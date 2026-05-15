@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+// NextAuth manages these tables automatically
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ── User ──────────────────────────────────────────────────────────────────────
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?  // ← add this — required by NextAuth adapter
+  createdAt     DateTime  @default(now())
+
+  accounts Account[]
+  sessions Session[]
+  flows    Flow[]
+}
+
+// ── Flow ──────────────────────────────────────────────────────────────────────
+model Flow {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  isPublic    Boolean  @default(false)  // appears in /explore if true
+  model       String   @default("gemini-2.5-flash")
+  runCount    Int      @default(0)      // how many times executed total
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps     Step[]
+  variables Variable[]
+  runs      Run[]
+}
+
+// ── Step ──────────────────────────────────────────────────────────────────────
+model Step {
+  id     String @id @default(cuid())
+  order  Int                    // 1, 2, 3 — execution order
+  title  String                 // "Find Flights"
+  prompt String                 // "Find cheapest flights to {country}"
+
+  flowId      String
+  flow        Flow         @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  stepOutputs StepOutput[]
+}
+
+// ── Variable ─────────────────────────────────────────────────────────────────
+model Variable {
+  id          String  @id @default(cuid())
+  name        String  // "country" — used in {country} placeholder
+  label       String  // "Destination Country" — shown in UI
+  placeholder String? // "e.g. Australia, Japan"
+
+  flowId String
+  flow   Flow   @relation(fields: [flowId], references: [id], onDelete: Cascade)
+}
+
+// ── Run ───────────────────────────────────────────────────────────────────────
+// One Run = one execution of a flow with specific variable values
+model Run {
+  id         String   @id @default(cuid())
+  values     Json     // { "country": "Japan", "budget": "$3000" }
+  model      String   // which LLM was used
+  createdAt  DateTime @default(now())
+
+  flowId      String
+  flow        Flow         @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  stepOutputs StepOutput[]
+}
+
+// ── StepOutput ────────────────────────────────────────────────────────────────
+// One StepOutput = result of one step within one run
+model StepOutput {
+  id       String @id @default(cuid())
+  order    Int    // matches Step.order
+  prompt   String // the filled prompt that was sent (with variables substituted)
+  output   String // the LLM's response
+
+  runId  String
+  run    Run    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stepId String
+  step   Step   @relation(fields: [stepId], references: [id], onDelete: Cascade)
+}
